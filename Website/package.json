@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "katex": "^0.16.25",
+    "lucide": "^0.554.0",
+    "lucide-react": "^0.554.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-katex": "^3.1.0",

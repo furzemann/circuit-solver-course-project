@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import './App.css';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { Share2, BookOpen, Menu, X, Save, Play, LogOut, CircuitBoard } from 'lucide-react';
 
 // --- Constants ---
 const GRID_SIZE = 16;
 const SNAP_RADIUS = GRID_SIZE;
-// Fallback to localhost if standard env var isn't available in this specific environment
 const API_URL = 'http://localhost:3000';
 
 // --- Component options ---
@@ -25,18 +25,11 @@ const getComponentById = (id) => {
 const getComponentName = (index, lines) => {
   const line = lines[index];
   if (!line) return '';
-  // Standard prefixes
   const typeMap = {
-    resistor: 'R',
-    capacitor: 'C',
-    inductor: 'L',
-    voltage_source: 'V',
-    current_source: 'I',
-    wire: 'W'
+    resistor: 'R', capacitor: 'C', inductor: 'L',
+    voltage_source: 'V', current_source: 'I', wire: 'W'
   };
   const prefix = typeMap[line.component] || '?';
-
-  // Count how many of this same type appear before or at this index
   let count = 0;
   for (let i = 0; i <= index; i++) {
     if (lines[i].component === line.component) count++;
@@ -74,7 +67,6 @@ function CircuitComponent({ x1, y1, x2, y2, component }) {
   );
 }
 
-// New: Dedicated component for rendering the actual icon and wires
 function CircuitIconRenderer({ x1, y1, x2, y2, component, wireStrokeWidth, componentIconStrokeWidth }) {
   const dx = x2 - x1;
   const dy = y2 - y1;
@@ -108,7 +100,6 @@ function CircuitIconRenderer({ x1, y1, x2, y2, component, wireStrokeWidth, compo
   );
 }
 
-
 function App() {
   // --- Main State ---
   const [lines, setLines] = useState([]);
@@ -119,6 +110,12 @@ function App() {
   const [showComponentPanel, setShowComponentPanel] = useState(false);
   const [selectedLineInfo, setSelectedLineInfo] = useState(null);
   const [editingValue, setEditingValue] = useState(10);
+  const [hoveredIndex, setHoveredIndex] = useState(null);
+
+  // --- Sidebar & Community State ---
+  const [showSidebar, setShowSidebar] = useState(true);
+  const [publicGraphs, setPublicGraphs] = useState([]);
+  const [activeTab, setActiveTab] = useState('my_circuits'); // 'my_circuits' or 'community'
 
   // --- Auth & Storage State ---
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -127,10 +124,13 @@ function App() {
   const [authMode, setAuthMode] = useState('login');
   const [authForm, setAuthForm] = useState({ name: '', email: '', password: '' });
   const [authError, setAuthError] = useState('');
-  const [showGraphsPanel, setShowGraphsPanel] = useState(false);
+  
+  // Storage
+  const [showGraphsPanel, setShowGraphsPanel] = useState(false); // Legacy panel, now part of sidebar
   const [savedGraphs, setSavedGraphs] = useState([]);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [saveGraphName, setSaveGraphName] = useState('');
+  const [saveIsPublic, setSaveIsPublic] = useState(false);
 
   // --- Solver State ---
   const [apiError, setApiError] = useState('');
@@ -140,8 +140,6 @@ function App() {
   const [chartHeight, setChartHeight] = useState(300);
   const [simulationTime, setSimulationTime] = useState(10);
   const [timeUnit, setTimeUnit] = useState('ms');
-  const [hovered, setHovered] = useState(false); // local state for hover (or you can lift this up)
-  const [hoveredIndex, setHoveredIndex] = useState(null);
 
   const mainRef = useRef(null);
 
@@ -174,12 +172,10 @@ function App() {
 
   const handleClick = (e) => {
     if (selectedLineInfo) setSelectedLineInfo(null);
-    if (!e.target.closest('.panel') && !e.target.closest('.top-controls') && !e.target.closest('.line-popup')) closeAllPanels();
-    if (e.target.closest('.panel') || e.target.closest('.top-controls') || e.target.closest('.line-popup')) return;
+    // Ignore clicks on UI elements
+    if (e.target.closest('.panel') || e.target.closest('.top-controls') || e.target.closest('.line-popup') || e.target.closest('.sidebar')) return;
 
-    if (selectedComponentId === 'select') {
-      return; 
-    }
+    if (selectedComponentId === 'select') return;
 
     const coords = getClickCoords(e);
     if (!coords) return;
@@ -206,20 +202,10 @@ function App() {
     setCurrentPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
   };
 
-  // --- MODIFIED: handleLineClick now only stops propagation in 'select' mode ---
   const handleLineClick = (e, index) => {
-    // If we are in 'part' mode (not 'select'), do nothing.
-    // This allows the click to bubble up to the main 'handleClick'
-    // which will then find the node and start a new line.
-    if (selectedComponentId !== 'select') {
-      return;
-    }
-
-    // If we ARE in 'select' mode, stop the click from
-    // reaching the canvas and process the selection.
+    if (selectedComponentId !== 'select') return;
     e.stopPropagation();
     if (startPoint) return;
-
     setSelectedLineInfo({ index, x: e.clientX, y: e.clientY });
     setEditingValue(lines[index].value);
   };
@@ -228,14 +214,9 @@ function App() {
     if (selectedLineInfo === null) return;
     const newLines = lines.filter((_, i) => i !== selectedLineInfo.index);
     const usedPoints = new Set();
-    newLines.forEach(l => {
-      usedPoints.add(`${l.x1},${l.y1}`);
-      usedPoints.add(`${l.x2},${l.y2}`);
-    });
+    newLines.forEach(l => { usedPoints.add(`${l.x1},${l.y1}`); usedPoints.add(`${l.x2},${l.y2}`); });
     const newNodes = nodes.filter(n => usedPoints.has(`${n.x},${n.y}`));
-    setLines(newLines);
-    setNodes(newNodes);
-    setSelectedLineInfo(null);
+    setLines(newLines); setNodes(newNodes); setSelectedLineInfo(null);
   };
 
   const handleValueSave = () => {
@@ -278,7 +259,6 @@ function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error?.message || 'Solver failed');
 
-      // Transform data for Recharts. Scale time back to selected unit for display
       let timeScaler = 1;
       if (timeUnit === 'hr') timeScaler = 3600;
       if (timeUnit === 'min') timeScaler = 60;
@@ -291,7 +271,7 @@ function App() {
         Object.keys(data).forEach(key => {
           if (key !== 'time') {
             point[`V_${key}`] = data[key].v[i];
-            point[`I_${key}`] = data[key].i[i] * 1000; // A -> mA. Keep current in mA for now, or make it dynamic too?
+            point[`I_${key}`] = data[key].i[i] * 1000;
           }
         });
         return point;
@@ -307,19 +287,96 @@ function App() {
   };
 
   // --- Auth & Storage Handlers ---
-  const loadGraphIntoState = (data) => { if (!data) return; setNodes(data.nodes || []); setLines((data.edges || []).map(e => ({ x1: e.from.x, y1: e.from.y, x2: e.to.x, y2: e.to.y, component: e.component || 'wire', value: e.value || 10 }))); closeAllPanels(); };
+  const loadGraphIntoState = (data) => {
+    if (!data) return;
+    setNodes(data.nodes || []);
+    setLines((data.edges || []).map(e => ({ x1: e.from.x, y1: e.from.y, x2: e.to.x, y2: e.to.y, component: e.component || 'wire', value: e.value || 10 })));
+    closeAllPanels();
+  };
+
   const handleAuthFormChange = (e) => setAuthForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
-  const handleLogin = async (e) => { e.preventDefault(); try { const res = await fetch(`${API_URL}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: authForm.name, password: authForm.password }), credentials: 'include' }); if (res.ok) { const d = await res.json(); setIsLoggedIn(true); setCurrentUser(d.name); closeAllPanels(); } else setAuthError('Login failed'); } catch (err) { setAuthError(err.message); } };
-  const handleRegister = async (e) => { e.preventDefault(); try { const res = await fetch(`${API_URL}/api/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(authForm) }); if (res.ok) setAuthMode('login'); else setAuthError('Failed'); } catch (err) { setAuthError(err.message); } };
-  const handleLogout = async () => { await fetch(`${API_URL}/api/logout`, { method: 'POST', credentials: 'include' }); setIsLoggedIn(false); setCurrentUser(null); closeAllPanels(); };
-  const fetchSavedGraphs = async () => { const res = await fetch(`${API_URL}/api/graphs`, { credentials: 'include' }); if (res.ok) setSavedGraphs(await res.json()); };
-  const handleConfirmSave = async () => { if (!saveGraphName) return; const graphData = { nodes, edges: lines.map(l => ({ from: { x: l.x1, y: l.y1 }, to: { x: l.x2, y: l.y2 }, component: l.component, value: l.value })) }; await fetch(`${API_URL}/api/graphs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ name: saveGraphName, graphData }) }); setShowSaveModal(false); };
-  const handleLoadGraph = async (id) => { const res = await fetch(`${API_URL}/api/graphs/${id}`, { credentials: 'include' }); if (res.ok) loadGraphIntoState(await res.json()); };
-  const handleDeleteGraph = async (id) => { if (window.confirm('Delete?')) { await fetch(`${API_URL}/api/graphs/${id}`, { method: 'DELETE', credentials: 'include' }); setSavedGraphs(prev => prev.filter(g => g._id !== id)); } };
+  
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch(`${API_URL}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: authForm.name, password: authForm.password }), credentials: 'include' });
+      if (res.ok) {
+        const d = await res.json();
+        setIsLoggedIn(true);
+        setCurrentUser(d.name);
+        closeAllPanels();
+        fetchSavedGraphs();
+        fetchPublicGraphs();
+      } else setAuthError('Login failed');
+    } catch (err) { setAuthError(err.message); }
+  };
 
-  useEffect(() => { fetch(`${API_URL}/api/profile`, { credentials: 'include' }).then(res => { if (res.ok) res.json().then(d => { setIsLoggedIn(true); setCurrentUser(d.user.name); }); }).catch(() => { }); }, []);
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch(`${API_URL}/api/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(authForm) });
+      if (res.ok) setAuthMode('login'); else setAuthError('Failed');
+    } catch (err) { setAuthError(err.message); }
+  };
 
-  // --- Formatter for noisy data ---
+  const handleLogout = async () => {
+    await fetch(`${API_URL}/api/logout`, { method: 'POST', credentials: 'include' });
+    setIsLoggedIn(false); setCurrentUser(null); closeAllPanels(); setSavedGraphs([]);
+  };
+
+  const fetchSavedGraphs = async () => {
+    const res = await fetch(`${API_URL}/api/graphs`, { credentials: 'include' });
+    if (res.ok) setSavedGraphs(await res.json());
+  };
+
+  const fetchPublicGraphs = async () => {
+    const res = await fetch(`${API_URL}/api/public-graphs`, { credentials: 'include' });
+    if (res.ok) setPublicGraphs(await res.json());
+  };
+
+  const handleConfirmSave = async () => {
+    if (!saveGraphName) return;
+    const graphData = { nodes, edges: lines.map(l => ({ from: { x: l.x1, y: l.y1 }, to: { x: l.x2, y: l.y2 }, component: l.component, value: l.value })) };
+    await fetch(`${API_URL}/api/graphs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ name: saveGraphName, graphData, isPublic: saveIsPublic })
+    });
+    setShowSaveModal(false);
+    fetchSavedGraphs(); // Refresh list
+    fetchPublicGraphs(); // Refresh public list in case we published
+  };
+
+  const handleLoadGraph = async (id) => {
+    const res = await fetch(`${API_URL}/api/graphs/${id}`, { credentials: 'include' });
+    if (res.ok) loadGraphIntoState(await res.json());
+  };
+
+  const handleDeleteGraph = async (id, e) => {
+    e.stopPropagation();
+    if (window.confirm('Delete?')) {
+      await fetch(`${API_URL}/api/graphs/${id}`, { method: 'DELETE', credentials: 'include' });
+      setSavedGraphs(prev => prev.filter(g => g._id !== id));
+      // Optionally refresh public graphs if it was public
+      fetchPublicGraphs();
+    }
+  };
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/profile`, { credentials: 'include' }).then(res => {
+      if (res.ok) res.json().then(d => {
+        setIsLoggedIn(true);
+        setCurrentUser(d.user.name);
+        fetchSavedGraphs();
+        fetchPublicGraphs();
+      });
+    }).catch(() => { });
+    
+    // Fetch public graphs anyway even if not logged in (if API allows) or handled by auth check
+    fetchPublicGraphs();
+  }, []);
+
   const formatNumber = (num) => {
     if (Math.abs(num) < 1e-10) return '0';
     if (Math.abs(num) >= 1000 || Math.abs(num) < 0.01) return num.toExponential(2);
@@ -328,250 +385,257 @@ function App() {
 
   return (
     <>
-      <div
-        ref={mainRef}
-        className={`main ${selectedComponentId === 'select' ? 'select-mode' : ''}`}
-        onClick={handleClick}
-        onMouseMove={handleMouseMove}
-      >
-        {/* --- Top Controls --- */}
-        <div className="top-controls">
-          {isLoggedIn ? (
-            <>
-              <span className="welcome-user">Hi, {currentUser}</span>
-              <button className="ui-button" onClick={() => { closeAllPanels(); setShowGraphsPanel(true); fetchSavedGraphs(); }}>Circuits</button>
-              <button className="ui-button" onClick={() => { closeAllPanels(); setShowSaveModal(true); }}>Save</button>
-              
-              <button
-                className={`ui-button ${selectedComponentId === 'select' ? 'active' : ''}`}
-                onClick={() => {
-                  setSelectedComponentId('select');
-                  setShowComponentPanel(false);
-                }}
-              >
-                Select
-              </button>
-              
-              <button
-                className={`ui-button ${showComponentPanel ? 'active' : ''}`}
-                onClick={() => {
-                  closeAllPanels();
-                  setShowComponentPanel(true);
-                  // --- NEW: Deselect 'select' tool when opening parts ---
-                  if (selectedComponentId === 'select') {
-                    setSelectedComponentId(componentOptions[0].id); // Default to wire
-                  }
-                }}
-              >
-                Parts
-              </button>
-
-              <button className="ui-button solve-button" onClick={handleSolve}>Simulate</button>
-              <button className="ui-button" onClick={handleLogout}>Logout</button>
-            </>
-          ) : (
-            <>
-              <button
-                className={`ui-button ${selectedComponentId === 'select' ? 'active' : ''}`}
-                onClick={() => {
-                  setSelectedComponentId('select');
-                  setShowComponentPanel(false);
-                }}
-              >
-                Select
-              </button>
-              
-              <button
-                className={`ui-button ${showComponentPanel ? 'active' : ''}`}
-                onClick={() => {
-                  closeAllPanels();
-                  setShowComponentPanel(true);
-                  // --- NEW: Deselect 'select' tool when opening parts ---
-                  if (selectedComponentId === 'select') {
-                    setSelectedComponentId(componentOptions[0].id); // Default to wire
-                  }
-                }}
-              >
-                Parts
-              </button>
-              <button className="ui-button" onClick={() => { closeAllPanels(); setShowAuthPanel(true); }}>Login</button>
-            </>
-          )}
-        </div>
-
-        {/* --- Panels --- */}
-        {showAuthPanel && <div className="panel auth-panel"><h3>{authMode.toUpperCase()}</h3><form onSubmit={authMode === 'login' ? handleLogin : handleRegister}><input name="name" value={authForm.name} onChange={handleAuthFormChange} placeholder="Username" required />{authMode === 'register' && <input name="email" type="email" value={authForm.email} onChange={handleAuthFormChange} placeholder="Email" required />}<input name="password" type="password" value={authForm.password} onChange={handleAuthFormChange} placeholder="Password" required /><button className="load-button">{authMode === 'login' ? 'Login' : 'Register'}</button></form><button className="link-button" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>Switch Mode</button>{authError && <p className="import-error">{authError}</p>}</div>}
-        {showSaveModal && <div className="panel save-modal"><h3>Save</h3><input value={saveGraphName} onChange={e => setSaveGraphName(e.target.value)} placeholder="Name" /><div className="save-modal-buttons"><button className="ui-button" onClick={() => setShowSaveModal(false)}>Cancel</button><button className="load-button" onClick={handleConfirmSave}>Save</button></div></div>}
-        {showGraphsPanel && <div className="panel graphs-panel"><h3>Circuits</h3><ul className="graphs-list">{savedGraphs.map(g => <li key={g._id}><span>{g.name}</span><div className="graph-buttons"><button onClick={() => handleLoadGraph(g._id)}>Load</button><button className="delete-graph-btn" onClick={() => handleDeleteGraph(g._id)}>X</button></div></li>)}</ul></div>}
-        
-        {showComponentPanel && (
-          <div className="panel component-panel">
-            <h3>Parts</h3>
-            <div className="component-swatches">
-              {componentOptions.map(c => (
-                <button
-                  key={c.id}
-                  className="component-swatch"
-                  onClick={() => setSelectedComponentId(c.id)}
-                >
-                  <div 
-                    className="component-swatch-color" 
-                    style={{ backgroundColor: c.color }} 
-                    data-selected={selectedComponentId === c.id}
-                  ></div>
-                  <span className="component-swatch-name">{c.name}</span>
-                </button>
-              ))}
-            </div>
+      <div className="app-container">
+        {/* --- LEFT SIDEBAR --- */}
+        <div className={`sidebar ${!showSidebar ? 'closed' : ''}`}>
+          <div className="sidebar-header">
+            <span>CircuitHub</span>
+            <button onClick={() => setShowSidebar(false)} style={{background:'none', border:'none', color:'inherit', cursor:'pointer'}}><X size={18}/></button>
           </div>
-        )}
+          
+          <div className="sidebar-tabs">
+            <button className={`sidebar-tab ${activeTab === 'my_circuits' ? 'active' : ''}`} onClick={() => setActiveTab('my_circuits')}>My Circuits</button>
+            <button className={`sidebar-tab ${activeTab === 'community' ? 'active' : ''}`} onClick={() => setActiveTab('community')}>Community</button>
+          </div>
 
-
-        {/* --- Solution Panel (Charts) --- */}
-        {showSolutionPanel && (
-          <div className="panel solution-panel">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <h3 style={{ margin: 0 }}>Results</h3>
-              <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
-                <label style={{ fontSize: '0.8rem' }}>Time:</label>
-                <input
-                  type="number"
-                  value={simulationTime}
-                  onChange={(e) => setSimulationTime(Number(e.target.value))}
-                  style={{ width: '50px', padding: '2px 4px', border: '1px solid #ccc', borderRadius: '4px' }}
-                />
-                <select
-                  value={timeUnit}
-                  onChange={(e) => setTimeUnit(e.target.value)}
-                  style={{ padding: '2px 4px', border: '1px solid #ccc', borderRadius: '4px', marginRight: '8px' }}
-                >
-                  <option value="hr">hr</option>
-                  <option value="min">min</option>
-                  <option value="s">s</option>
-                  <option value="ms">ms</option>
-                  <option value="µs">µs</option>
-                </select>
-                <button className="ui-button solve-button" style={{ padding: '4px 8px', fontSize: '0.8rem' }} onClick={handleSolve}>Run</button>
-                <button className="delete-graph-btn" onClick={() => setShowSolutionPanel(false)}>X</button>
-              </div>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '10px' }}>
-              <button className="ui-button" style={{ padding: '2px 8px', marginRight: '4px' }} onClick={() => setChartHeight(h => Math.max(h - 50, 150))}>- Height</button>
-              <button className="ui-button" style={{ padding: '2px 8px' }} onClick={() => setChartHeight(h => Math.min(h + 50, 600))}>+ Height</button>
-            </div>
-
-            {apiError && <p className="import-error">{apiError}</p>}
-            {!solutionData && !apiError && <p>Running simulation...</p>}
-            {solutionData && (
+          <div className="sidebar-content">
+            {activeTab === 'my_circuits' && (
               <>
-                <div className="chart-controls">
-                  <label>Component:</label>
-                  <select value={selectedPlotComponent || ''} onChange={(e) => setSelectedPlotComponent(e.target.value)}>
-                    {solutionData.components.map(name => <option key={name} value={name}>{name}</option>)}
-                  </select>
-                </div>
-                {selectedPlotComponent && (
-                  <div className="chart-container">
-
-                    <ResponsiveContainer width="100%" height={chartHeight}>
-                      <LineChart data={solutionData.chartData} syncId="circuit-sync" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                        <XAxis dataKey="time" label={{ value: `Time (${solutionData.displayUnit})`, position: 'insideBottomRight', offset: -5, fill: '#374151', fontSize: 12 }} tick={{ fontSize: 10, fill: '#374151' }} stroke="#9ca3af" />
-                        <YAxis
-                          label={{ value: 'Voltage (V)', angle: -90, position: 'insideLeft', fill: '#374151', fontSize: 12 }}
-                          tick={{ fontSize: 10, fill: '#374151' }}
-                          stroke="#9ca3af"
-                          domain={[(dataMin) => dataMin - Math.abs(dataMin) * 0.05 || dataMin - 1, (dataMax) => dataMax + Math.abs(dataMax) * 0.05 || dataMax + 1]}
-                          tickFormatter={formatNumber}
-                        />
-                        <Tooltip contentStyle={{ backgroundColor: '#fff', borderColor: '#e5e7eb', fontSize: '12px', color: '#111827' }} itemStyle={{ color: '#111827' }} labelFormatter={(t) => `Time: ${t.toFixed(3)}${solutionData.displayUnit}`} formatter={formatNumber} />
-                        <Legend verticalAlign="top" height={36} />
-                        <Line name={`V(${selectedPlotComponent})`} type="monotone" dataKey={`V_${selectedPlotComponent}`} stroke="#8884d8" strokeWidth={2} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} />
-                      </LineChart>
-                    </ResponsiveContainer>
-
-                    <ResponsiveContainer width="100%" height={chartHeight}>
-                      <LineChart data={solutionData.chartData} syncId="circuit-sync" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                        <XAxis dataKey="time" label={{ value: `Time (${solutionData.displayUnit})`, position: 'insideBottomRight', offset: -5, fill: '#374151', fontSize: 12 }} tick={{ fontSize: 10, fill: '#374151' }} stroke="#9ca3af" />
-                        <YAxis
-                          label={{ value: 'Current (mA)', angle: -90, position: 'insideLeft', fill: '#374151', fontSize: 12 }}
-                          tick={{ fontSize: 10, fill: '#374151' }}
-                          stroke="#9ca3af"
-                          domain={[(dataMin) => dataMin - Math.abs(dataMin) * 0.05 || dataMin - 1, (dataMax) => dataMax + Math.abs(dataMax) * 0.05 || dataMax + 1]}
-                          tickFormatter={formatNumber}
-                        />
-                        <Tooltip contentStyle={{ backgroundColor: '#fff', borderColor: '#e5e7eb', fontSize: '12px', color: '#111827' }} itemStyle={{ color: '#111827' }} labelFormatter={(t) => `Time: ${t.toFixed(3)}${solutionData.displayUnit}`} formatter={formatNumber} />
-                        <Legend verticalAlign="top" height={36} />
-                        <Line name={`I(${selectedPlotComponent})`} type="monotone" dataKey={`I_${selectedPlotComponent}`} stroke="#82ca9d" strokeWidth={2} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} />
-                      </LineChart>
-                    </ResponsiveContainer>
+                {!isLoggedIn ? (
+                  <div style={{textAlign:'center', padding:'20px', color:'var(--text-dim)'}}>
+                    <p>Login to save your circuits.</p>
+                    <button className="ui-button" style={{width:'100%', justifyContent:'center'}} onClick={() => { closeAllPanels(); setShowAuthPanel(true); }}>Login / Register</button>
                   </div>
+                ) : (
+                  <>
+                    {savedGraphs.length === 0 && <p style={{color:'var(--text-dim)', textAlign:'center'}}>No saved circuits.</p>}
+                    {savedGraphs.map(g => (
+                      <div key={g._id} className="circuit-list-item" onClick={() => handleLoadGraph(g._id)}>
+                        <div className="circuit-info">
+                          <h4>{g.name}</h4>
+                          <p>{g.isPublic ? 'Public' : 'Private'}</p>
+                        </div>
+                        <button className="delete-graph-btn" onClick={(e) => handleDeleteGraph(g._id, e)}><X size={14}/></button>
+                      </div>
+                    ))}
+                  </>
                 )}
               </>
             )}
-          </div>
-        )}
 
-        {/* --- Popups & Canvas --- */}
-        {selectedLineInfo && (
-          <div className="line-popup" style={{ top: selectedLineInfo.y + 10, left: selectedLineInfo.x + 10 }} onClick={e => e.stopPropagation()}>
-            <div className="line-popup-header">
-              <div className="line-popup-color-swatch" style={{ backgroundColor: getComponentById(lines[selectedLineInfo.index].component).color }}></div>
-              <span className="line-popup-component-name">
-                {getComponentName(selectedLineInfo.index, lines)}: {getComponentById(lines[selectedLineInfo.index].component).name}
-              </span>
-            </div>
-            <div className="line-popup-value">
-              <label>Val:</label>
-              <input type="text" value={editingValue} onChange={e => setEditingValue(e.target.value)} onBlur={handleValueSave} onKeyDown={handleValueKeydown} disabled={lines[selectedLineInfo.index].component === 'wire'} />
-            </div>
-            <button className="delete-button" onClick={handleDeleteLine}>Delete</button>
+            {activeTab === 'community' && (
+               <>
+                 {publicGraphs.length === 0 && <p style={{color:'var(--text-dim)', textAlign:'center'}}>No public circuits found.</p>}
+                 {publicGraphs.map(g => (
+                    <div key={g._id} className="circuit-list-item" onClick={() => handleLoadGraph(g._id)}>
+                      <div className="circuit-info">
+                        <h4>{g.name}</h4>
+                        <p>by {g.ownerName || 'Unknown'}</p>
+                      </div>
+                      <BookOpen size={14} color="#9ca3af"/>
+                    </div>
+                 ))}
+               </>
+            )}
           </div>
-        )}
+          
+          {isLoggedIn && (
+            <div style={{padding:'10px', borderTop:'1px solid var(--panel-border)', display:'flex', alignItems:'center', justifyContent:'space-between'}}>
+              <span style={{fontSize:'0.8rem', color: 'var(--text-bright)'}}>{currentUser}</span>
+              <button onClick={handleLogout} style={{background:'none', border:'none', color:'var(--accent-danger)', cursor:'pointer'}} title="Logout"><LogOut size={16}/></button>
+            </div>
+          )}
+        </div>
 
-        <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 0 }}>
-          {nodes.map((n, i) => <circle key={`n${i}`} cx={n.x} cy={n.y} r="5" fill="#374151" style={{ pointerEvents: 'none' }} />)}
-          {lines.map((l, i) => {
-            const comp = getComponentById(l.component);
-            const hovered = hoveredIndex === i; // global state for hover tracking
-            return (
-              <g
-                key={i}
-                onMouseEnter={() => setHoveredIndex(i)}
-                onMouseLeave={() => setHoveredIndex(null)}
-                onClick={(e) => handleLineClick(e, i)}
-                style={{ cursor: selectedComponentId === 'select' ? 'pointer' : 'inherit' }}
-              >
-                {/* Invisible hitbox for easy hover/click detection */}
-                <rect
-                  x={Math.min(l.x1, l.x2) - 12}
-                  y={Math.min(l.y1, l.y2) - 12}
-                  width={Math.abs(l.x2 - l.x1) + 24}
-                  height={Math.abs(l.y2 - l.y1) + 24}
-                  fill="transparent"
-                  pointerEvents="all"
+
+        {/* --- MAIN AREA --- */}
+        <div ref={mainRef} className={`main ${selectedComponentId === 'select' ? 'select-mode' : ''}`} onClick={handleClick} onMouseMove={handleMouseMove}>
+          
+          {/* Top Bar */}
+          <div className="top-controls">
+            {!showSidebar && (
+              <button className="ui-button" onClick={() => setShowSidebar(true)}>
+                <Menu size={16}/>
+              </button>
+            )}
+            
+            <div style={{width:'1px', height:'20px', background:'#e5e7eb', margin:'0 5px'}}></div>
+
+            <button
+              className={`ui-button ${selectedComponentId === 'select' ? 'active' : ''}`}
+              onClick={() => { setSelectedComponentId('select'); setShowComponentPanel(false); }}
+            >
+              Select
+            </button>
+            
+            <button
+              className={`ui-button ${showComponentPanel ? 'active' : ''}`}
+              onClick={() => { closeAllPanels(); setShowComponentPanel(true); if (selectedComponentId === 'select') setSelectedComponentId(componentOptions[0].id); }}
+            >
+              <CircuitBoard size={16}/> Parts
+            </button>
+
+            {isLoggedIn && (
+               <button className="ui-button" onClick={() => { closeAllPanels(); setShowSaveModal(true); }}>
+                 <Save size={16}/> Save
+               </button>
+            )}
+
+            <button className="ui-button solve-button" onClick={handleSolve}>
+              <Play size={16}/> Simulate
+            </button>
+            
+            {!isLoggedIn && <button className="ui-button" onClick={() => setShowAuthPanel(true)}>Login</button>}
+          </div>
+
+          {/* Panels */}
+          {showAuthPanel && (
+            <div className="panel auth-panel">
+              <h3>{authMode === 'login' ? 'Welcome Back' : 'Create Account'}</h3>
+              <form onSubmit={authMode === 'login' ? handleLogin : handleRegister}>
+                <input name="name" value={authForm.name} onChange={handleAuthFormChange} placeholder="Username" required />
+                {authMode === 'register' && <input name="email" type="email" value={authForm.email} onChange={handleAuthFormChange} placeholder="Email" required />}
+                <input name="password" type="password" value={authForm.password} onChange={handleAuthFormChange} placeholder="Password" required />
+                <button className="load-button">{authMode === 'login' ? 'Login' : 'Register'}</button>
+              </form>
+              <div style={{marginTop:'10px', textAlign:'center', fontSize:'0.8rem'}}>
+                <span onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} style={{color:'var(--accent-primary)', cursor:'pointer', textDecoration:'underline'}}>
+                  {authMode === 'login' ? 'Need an account? Register' : 'Have an account? Login'}
+                </span>
+              </div>
+              {authError && <p className="import-error">{authError}</p>}
+              <button onClick={() => setShowAuthPanel(false)} style={{position:'absolute', top:'10px', right:'10px', background:'none', border:'none', cursor:'pointer'}}><X size={18} /></button>
+            </div>
+          )}
+
+          {showSaveModal && (
+            <div className="panel save-modal">
+              <h3>Save Circuit</h3>
+              <input value={saveGraphName} onChange={e => setSaveGraphName(e.target.value)} placeholder="Circuit Name" />
+              
+              <div style={{display:'flex', alignItems:'center', gap:'10px', marginBottom:'15px'}}>
+                <input 
+                  type="checkbox" 
+                  id="publicCheck" 
+                  checked={saveIsPublic} 
+                  onChange={e => setSaveIsPublic(e.target.checked)} 
+                  style={{width: 'auto', marginBottom: 0}}
                 />
+                <label htmlFor="publicCheck" style={{fontSize:'0.9rem', cursor:'pointer'}}>Share to Community</label>
+              </div>
 
-                {/* Static component (never moves) */}
-                <g pointerEvents="none">
-                  <CircuitComponent
-                    x1={l.x1}
-                    y1={l.y1}
-                    x2={l.x2}
-                    y2={l.y2}
-                    component={comp}
-                    hovered={hovered}
-                  />
+              <div className="save-modal-buttons" style={{display:'flex', gap:'10px'}}>
+                <button className="ui-button" onClick={() => setShowSaveModal(false)} style={{flex:1, justifyContent: 'center'}}>Cancel</button>
+                <button className="load-button" onClick={handleConfirmSave} style={{flex:1}}>Save</button>
+              </div>
+            </div>
+          )}
+          
+          {showComponentPanel && (
+            <div className="panel component-panel">
+              <h4 style={{margin:'0 0 10px 0', fontSize: '0.9rem', color: 'var(--text-dim)'}}>COMPONENTS</h4>
+              <div className="component-swatches">
+                {componentOptions.map(c => (
+                  <button key={c.id} className="component-swatch" onClick={() => {setSelectedComponentId(c.id); setShowComponentPanel(false);}}>
+                    <div className="component-swatch-color" style={{ backgroundColor: c.color }} data-selected={selectedComponentId === c.id}></div>
+                    <span className="component-swatch-name" style={{fontSize:'0.85rem'}}>{c.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Solution Panel */}
+          {showSolutionPanel && (
+            <div className="panel solution-panel">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <h3 style={{ margin: 0 }}>Results</h3>
+                <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                  <label style={{ fontSize: '0.8rem' }}>Time:</label>
+                  <input type="number" value={simulationTime} onChange={(e) => setSimulationTime(Number(e.target.value))} style={{ width: '50px' }} />
+                  <select value={timeUnit} onChange={(e) => setTimeUnit(e.target.value)} style={{ marginRight: '8px' }}>
+                    <option value="hr">hr</option><option value="min">min</option><option value="s">s</option><option value="ms">ms</option><option value="µs">µs</option>
+                  </select>
+                  <button className="ui-button solve-button" style={{ padding: '4px 8px', fontSize: '0.8rem' }} onClick={handleSolve}>Run</button>
+                  <button className="delete-graph-btn" onClick={() => setShowSolutionPanel(false)}><X size={16}/></button>
+                </div>
+              </div>
+              
+              {apiError && <p className="import-error">{apiError}</p>}
+              {!solutionData && !apiError && <p>Running simulation...</p>}
+              {solutionData && (
+                <>
+                  <div className="chart-controls" style={{marginBottom:'10px'}}>
+                    <label style={{marginRight:'5px', fontSize:'0.9rem'}}>Probe:</label>
+                    <select value={selectedPlotComponent || ''} onChange={(e) => setSelectedPlotComponent(e.target.value)}>
+                      {solutionData.components.map(name => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                  </div>
+                  {selectedPlotComponent && (
+                    <div className="chart-container">
+                      <ResponsiveContainer width="100%" height={chartHeight}>
+                        <LineChart data={solutionData.chartData} syncId="circuit-sync" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="time" label={{ value: `Time (${solutionData.displayUnit})`, position: 'insideBottomRight', offset: -5 }} tick={{ fontSize: 10 }} />
+                          <YAxis label={{ value: 'Voltage (V)', angle: -90, position: 'insideLeft' }} tick={{ fontSize: 10 }} tickFormatter={formatNumber} />
+                          <Tooltip contentStyle={{ fontSize: '12px' }} formatter={formatNumber} />
+                          <Legend verticalAlign="top" height={36} />
+                          <Line name={`V(${selectedPlotComponent})`} type="monotone" dataKey={`V_${selectedPlotComponent}`} stroke="#8884d8" strokeWidth={2} dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                      <ResponsiveContainer width="100%" height={chartHeight}>
+                        <LineChart data={solutionData.chartData} syncId="circuit-sync" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="time" label={{ value: `Time (${solutionData.displayUnit})`, position: 'insideBottomRight', offset: -5 }} tick={{ fontSize: 10 }} />
+                          <YAxis label={{ value: 'Current (mA)', angle: -90, position: 'insideLeft' }} tick={{ fontSize: 10 }} tickFormatter={formatNumber} />
+                          <Tooltip contentStyle={{ fontSize: '12px' }} formatter={formatNumber} />
+                          <Legend verticalAlign="top" height={36} />
+                          <Line name={`I(${selectedPlotComponent})`} type="monotone" dataKey={`I_${selectedPlotComponent}`} stroke="#82ca9d" strokeWidth={2} dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Canvas SVG */}
+          <svg style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 0 }}>
+            {nodes.map((n, i) => <circle key={`n${i}`} cx={n.x} cy={n.y} r="5" fill="#374151" style={{ pointerEvents: 'none' }} />)}
+            {lines.map((l, i) => {
+              const comp = getComponentById(l.component);
+              const hovered = hoveredIndex === i;
+              return (
+                <g key={i} onMouseEnter={() => setHoveredIndex(i)} onMouseLeave={() => setHoveredIndex(null)} onClick={(e) => handleLineClick(e, i)} style={{ cursor: selectedComponentId === 'select' ? 'pointer' : 'inherit' }}>
+                  <rect x={Math.min(l.x1, l.x2) - 12} y={Math.min(l.y1, l.y2) - 12} width={Math.abs(l.x2 - l.x1) + 24} height={Math.abs(l.y2 - l.y1) + 24} fill="transparent" pointerEvents="all" />
+                  <g pointerEvents="none"><CircuitComponent x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2} component={comp} hovered={hovered} /></g>
                 </g>
-              </g>
-            );
-          })}
+              );
+            })}
+            {startPoint && currentPos && <line x1={startPoint.x} y1={startPoint.y} x2={currentPos.x} y2={currentPos.y} stroke="#6b7280" strokeWidth="2" strokeDasharray="4 4" style={{ pointerEvents: 'none' }} />}
+          </svg>
 
+          {/* Edit Popup */}
+          {selectedLineInfo && (
+            <div className="line-popup" style={{ top: selectedLineInfo.y + 10, left: selectedLineInfo.x + 10 }} onClick={e => e.stopPropagation()}>
+              <div className="line-popup-header">
+                <div className="line-popup-color-swatch" style={{ backgroundColor: getComponentById(lines[selectedLineInfo.index].component).color }}></div>
+                <span className="line-popup-component-name" style={{fontSize:'0.9rem', fontWeight:'bold'}}>
+                  {getComponentName(selectedLineInfo.index, lines)}
+                </span>
+              </div>
+              
+              <div className="line-popup-value">
+                <label style={{fontSize:'0.8rem'}}>Val:</label>
+                <input type="text" value={editingValue} onChange={e => setEditingValue(e.target.value)} onBlur={handleValueSave} onKeyDown={handleValueKeydown} disabled={lines[selectedLineInfo.index].component === 'wire'} />
+              </div>
+              
+              <button className="delete-button" onClick={handleDeleteLine}>Delete Component</button>
+            </div>
+          )}
 
-          {startPoint && currentPos && <line x1={startPoint.x} y1={startPoint.y} x2={currentPos.x} y2={currentPos.y} stroke="#6b7280" strokeWidth="2" strokeDasharray="4 4" style={{ pointerEvents: 'none' }} />}
-        </svg>
-        <div style={{ zIndex: 1 }}><h1>Circuit Builder</h1></div>
+        </div>
       </div>
     </>
   );
